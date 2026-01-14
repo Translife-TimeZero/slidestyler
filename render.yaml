@@ -1,0 +1,17 @@
+# Render.com deployment configuration
+# Set REPLICATE_API_TOKEN in Render dashboard under Environment Variables
+services:
+  - type: web
+    name: slidestyler-api
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: REPLICATE_API_TOKEN
+        sync: false  # Set manually in Render dashboard
+    healthCheckPath: /api/health
+    autoDeploy: true

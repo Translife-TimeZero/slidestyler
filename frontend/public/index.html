@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="description" content="SlideStyler - Transform your PowerPoint presentations with AI-powered design. Upload any PPTX, choose from 20+ professional styles, and get beautifully redesigned slides instantly." />
+    <meta name="keywords" content="PowerPoint, PPTX, presentation design, AI, slides, redesign, professional" />
+    
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SlideStyler - AI-Powered PowerPoint Redesigner" />
+    <meta property="og:description" content="Transform your presentations with world-class AI-powered design. Upload any PPTX, choose from 20+ professional styles." />
+    <meta property="og:image" content="https://via.placeholder.com/1200x630/1a1a2e/a78bfa?text=SlideStyler" />
+    
+    <title>SlideStyler - AI-Powered PowerPoint Redesigner</title>
+    
+    <!-- Preconnect to Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      html, body, #root {
+        height: 100%;
+      }
+      
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        background-attachment: fixed;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      
+      /* Loading state before React mounts */
+      #root:empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      
+      #root:empty::before {
+        content: '';
+        width: 48px;
+        height: 48px;
+        border: 3px solid rgba(167, 139, 250, 0.3);
+        border-top-color: #a78bfa;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      /* Selection color */
+      ::selection {
+        background: rgba(167, 139, 250, 0.3);
+        color: #ffffff;
+      }
+      
+      /* Scrollbar styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: rgba(167, 139, 250, 0.3);
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(167, 139, 250, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run SlideStyler.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
