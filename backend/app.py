@@ -565,10 +565,9 @@ convert().catch(console.error);
 """
 
 
-def generate_professional_pptx(session: dict) -> str:
-    """Generate a professional PPTX using the PPTXExporter"""
+def generate_professional_pptx(session: dict, use_ai: bool = True) -> str:
+    """Generate a professional PPTX - optionally using AI for design"""
     try:
-        style = get_style_by_name(session.get('selected_style', 'executive_minimal'))
         slides_data = session.get('redesigned_slides', [])
         
         if not slides_data:
@@ -578,7 +577,20 @@ def generate_professional_pptx(session: dict) -> str:
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, 'redesigned_presentation.pptx')
         
-        # Use the professional exporter
+        if use_ai:
+            # Use AI-powered generator for custom designs
+            from services.ai_pptx_generator import generate_ai_presentation
+            api_key = os.environ.get('REPLICATE_API_TOKEN')
+            
+            try:
+                asyncio.run(generate_ai_presentation(slides_data, output_path, api_key))
+                print(f"[AI Generator] Successfully created AI-designed presentation")
+                return output_path
+            except Exception as ai_error:
+                print(f"[AI Generator] Failed: {ai_error}, falling back to template")
+        
+        # Fallback to template-based exporter
+        style = get_style_by_name(session.get('selected_style', 'executive_minimal'))
         export_presentation(style, slides_data, output_path)
         
         return output_path
