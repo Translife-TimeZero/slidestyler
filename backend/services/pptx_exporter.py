@@ -60,8 +60,10 @@ class PPTXExporter:
         body_texts = []
         
         # Title-like types (from PowerPoint placeholder types)
-        title_types = ['title', 'ctrTitle', 'TITLE', 'CENTER_TITLE', 'sldNum', None]
+        title_types = ['title', 'ctrTitle', 'TITLE', 'CENTER_TITLE']
         subtitle_types = ['subTitle', 'SUBTITLE', 'subtitle']
+        # Skip these types - they're metadata, not content
+        skip_types = ['sldNum', 'ftr', 'dt', 'hdr']
         
         for item in original_content:
             # Handle both dict and string items
@@ -73,6 +75,16 @@ class PPTXExporter:
                 text = item.get('text', '').strip()
             
             if not text:
+                continue
+            
+            # Skip metadata types (slide numbers, footers, dates, headers)
+            if item_type in skip_types:
+                print(f"  -> Skipping metadata: type='{item_type}', text='{text[:30]}...'")
+                continue
+            
+            # Skip items that look like just numbers (slide numbers without proper type)
+            if text.isdigit() and len(text) <= 3:
+                print(f"  -> Skipping number: '{text}'")
                 continue
             
             print(f"  -> Item type='{item_type}', text='{text[:50]}...'")
