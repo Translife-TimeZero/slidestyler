@@ -51,33 +51,61 @@ class PPTXExporter:
         layout_type = slide_data.get('layout_type', 'content')
         original_content = slide_data.get('original_content', [])
         
+        # Debug log
+        print(f"[PPTX Export] Slide {slide_data.get('slide_number', '?')}: layout={layout_type}, content_items={len(original_content)}")
+        
         # Extract title and body
         title = ""
         subtitle = ""
         body_texts = []
         
+        # Title-like types (from PowerPoint placeholder types)
+        title_types = ['title', 'ctrTitle', 'TITLE', 'CENTER_TITLE', 'sldNum', None]
+        subtitle_types = ['subTitle', 'SUBTITLE', 'subtitle']
+        
         for item in original_content:
-            item_type = item.get('type', 'body')
-            text = item.get('text', '').strip()
+            # Handle both dict and string items
+            if isinstance(item, str):
+                text = item.strip()
+                item_type = 'body'
+            else:
+                item_type = item.get('type', 'body')
+                text = item.get('text', '').strip()
+            
             if not text:
                 continue
+            
+            print(f"  -> Item type='{item_type}', text='{text[:50]}...'")
                 
-            if item_type in ['title', 'ctrTitle', 'TITLE', 'CENTER_TITLE']:
+            if item_type in title_types and not title:
                 title = text
-            elif item_type in ['subTitle', 'SUBTITLE']:
+            elif item_type in subtitle_types:
                 subtitle = text
             else:
                 body_texts.append(text)
         
+        # Fallback: If no title found but we have body texts, use first as title
+        if not title and body_texts:
+            title = body_texts.pop(0)
+        
+        # Fallback: If still nothing, try to extract from slide_data directly
+        if not title and not body_texts:
+            # Try getting from ai_instructions or html content
+            ai_inst = slide_data.get('ai_instructions', {})
+            if ai_inst:
+                title = ai_inst.get('purpose', '') or f"Slide {slide_data.get('slide_number', '')}"
+        
+        print(f"  -> Final: title='{title[:30] if title else 'None'}', body_count={len(body_texts)}")
+        
         # Create appropriate slide type
         if layout_type == 'title':
-            self._create_title_slide(title, subtitle)
+            self._create_title_slide(title, subtitle or (body_texts[0] if body_texts else ''))
         elif layout_type == 'closing':
-            self._create_closing_slide(title, body_texts)
+            self._create_closing_slide(title or "Thank You", body_texts)
         elif layout_type == 'section_break':
-            self._create_section_slide(title)
+            self._create_section_slide(title or "Section")
         elif layout_type == 'two_column':
-            mid = len(body_texts) // 2
+            mid = max(1, len(body_texts) // 2)
             self._create_two_column_slide(title, body_texts[:mid], body_texts[mid:])
         elif layout_type == 'stats':
             self._create_stats_slide(title, body_texts)

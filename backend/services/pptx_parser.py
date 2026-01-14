@@ -45,6 +45,10 @@ class PPTXParser:
             self._parse_slides()
             self._extract_media()
 
+            print(f"[Parser] Parsed {len(self.slides)} slides")
+            for i, slide in enumerate(self.slides):
+                print(f"  Slide {i+1}: {len(slide.get('text_content', []))} text items, layout={slide.get('layout_type')}")
+            
             return {
                 'metadata': self.metadata,
                 'slides': self.slides,
@@ -173,11 +177,13 @@ class PPTXParser:
             if shape_data:
                 slide_data['shapes'].append(shape_data)
                 if shape_data.get('text'):
-                    slide_data['text_content'].append({
-                        'type': shape_data.get('placeholder_type', 'body'),
+                    text_item = {
+                        'type': shape_data.get('placeholder_type') or 'body',
                         'text': shape_data['text'],
                         'formatting': shape_data.get('formatting', {})
-                    })
+                    }
+                    slide_data['text_content'].append(text_item)
+                    print(f"  [Parser] Found text: type={text_item['type']}, text={text_item['text'][:50]}...")
 
         # Check for charts
         if sp_tree.find('.//p:graphicFrame', NAMESPACES) is not None:
@@ -245,10 +251,23 @@ class PPTXParser:
     def _extract_paragraph_text(self, paragraph):
         """Extract text from a paragraph element"""
         texts = []
+        # Try finding text runs
         for r in paragraph.findall('.//a:r', NAMESPACES):
             t = r.find('a:t', NAMESPACES)
             if t is not None and t.text:
                 texts.append(t.text)
+        
+        # Also check for direct text (a:t without a:r wrapper)
+        for t in paragraph.findall('a:t', NAMESPACES):
+            if t.text:
+                texts.append(t.text)
+        
+        # Check for field text (like slide numbers)
+        for fld in paragraph.findall('.//a:fld', NAMESPACES):
+            t = fld.find('a:t', NAMESPACES)
+            if t is not None and t.text:
+                texts.append(t.text)
+        
         return ' '.join(texts)
 
     def _extract_text_formatting(self, tx_body):
