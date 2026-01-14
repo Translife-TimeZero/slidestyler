@@ -1,4 +1,6 @@
-# SlideStyler - AI-Powered World-Class PowerPoint Redesigner
+# SlideStyler
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Translife-TimeZero/slidestyler) - AI-Powered World-Class PowerPoint Redesigner
 
 Transform your PowerPoint presentations with an AI Design Director that acts as the world's top PowerPoint designer. Get per-slide design instructions tailored to your content with consistent visual concepts across your entire presentation.
 
