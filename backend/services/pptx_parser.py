@@ -177,13 +177,31 @@ class PPTXParser:
             if shape_data:
                 slide_data['shapes'].append(shape_data)
                 if shape_data.get('text'):
-                    text_item = {
-                        'type': shape_data.get('placeholder_type') or 'body',
-                        'text': shape_data['text'],
-                        'formatting': shape_data.get('formatting', {})
-                    }
-                    slide_data['text_content'].append(text_item)
-                    print(f"  [Parser] Found text: type={text_item['type']}, text={text_item['text'][:50]}...")
+                    placeholder_type = shape_data.get('placeholder_type') or 'body'
+                    
+                    # For title-like content, use the full text
+                    # For body content with multiple paragraphs, split into separate items
+                    if placeholder_type in ['title', 'ctrTitle', 'subTitle']:
+                        text_item = {
+                            'type': placeholder_type,
+                            'text': shape_data['text'],
+                            'formatting': shape_data.get('formatting', {})
+                        }
+                        slide_data['text_content'].append(text_item)
+                        print(f"  [Parser] Found text: type={text_item['type']}, text={text_item['text'][:50]}...")
+                    else:
+                        # Split body text into individual paragraphs
+                        paragraphs = shape_data.get('text_paragraphs', [shape_data['text']])
+                        for para in paragraphs:
+                            para = para.strip()
+                            if para:
+                                text_item = {
+                                    'type': placeholder_type,
+                                    'text': para,
+                                    'formatting': shape_data.get('formatting', {})
+                                }
+                                slide_data['text_content'].append(text_item)
+                                print(f"  [Parser] Found text: type={text_item['type']}, text={text_item['text'][:50]}...")
 
         # Check for charts
         if sp_tree.find('.//p:graphicFrame', NAMESPACES) is not None:
@@ -243,7 +261,9 @@ class PPTXParser:
                 para_text = self._extract_paragraph_text(p)
                 if para_text:
                     paragraphs.append(para_text)
+            # Store as list for multi-paragraph content, joined for display
             shape_data['text'] = '\n'.join(paragraphs)
+            shape_data['text_paragraphs'] = paragraphs  # Keep individual paragraphs
             shape_data['formatting'] = self._extract_text_formatting(tx_body)
 
         return shape_data if shape_data['text'] or shape_data['placeholder_type'] else None
