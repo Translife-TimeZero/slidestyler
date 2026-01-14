@@ -1,6 +1,6 @@
 """
-AI-Powered PPTX Generator with Seedream-4 Image Integration
-Creates stunning presentations where AI images and text blend perfectly
+AI-Powered PPTX Generator with Proper Layer Separation
+Background, Images, and Text are completely separate and editable
 """
 
 import os
@@ -8,7 +8,6 @@ import io
 import json
 import httpx
 import asyncio
-import base64
 import tempfile
 from typing import Dict, List, Optional, Tuple
 from pptx import Presentation
@@ -16,6 +15,7 @@ from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
+from pptx.oxml.ns import qn
 
 
 def hex_to_rgb(hex_color: str) -> RGBColor:
@@ -30,60 +30,21 @@ def hex_to_rgb(hex_color: str) -> RGBColor:
     return RGBColor(0, 0, 0)
 
 
-# Prompt for AI to generate design with image integration
-DESIGN_WITH_IMAGE_PROMPT = """You are a world-class presentation designer. Analyze this slide content and create a design where text and visuals blend perfectly.
-
-SLIDE CONTENT:
-{content}
-
-SLIDE POSITION: {position} of {total} slides
-CONTEXT: {context}
-
-Generate a JSON response:
-{{
-    "layout": "hero_image|split_image|corner_image|full_background|cards|grid",
-    "image_prompt": "describe an abstract, professional image that represents this content (e.g., 'abstract blue waves representing flow and progress', 'geometric shapes in dark blue suggesting structure')",
-    "image_position": "background|left|right|top-right|bottom-left",
-    "image_opacity": 0.3-1.0,
-    "text_area": {{
-        "position": "left|right|center|bottom",
-        "has_overlay": true/false,
-        "overlay_color": "#hex with 80% opacity"
-    }},
-    "colors": {{
-        "primary": "#hex (main brand color)",
-        "accent": "#hex (highlight color)", 
-        "text": "#hex (must contrast with background)",
-        "text_secondary": "#hex (subtitles, muted)"
-    }},
-    "title": {{
-        "text": "clean, shortened title",
-        "size": 32-54,
-        "position": "specify x,y as percentages"
-    }},
-    "mood": "professional|dynamic|calm|bold|innovative",
-    "blend_style": "overlay|side-by-side|floating-cards|gradient-fade"
-}}
-
-CRITICAL RULES:
-- Text MUST be readable - use overlays or position text away from busy image areas
-- Image should enhance message, not distract
-- First slide = impactful hero with dramatic image
-- Last slide = memorable closing
-- Colors must work together harmoniously
-
-Respond ONLY with valid JSON."""
-
-
 class AIPPTXGenerator:
-    """AI-powered PPTX generator with Seedream-4 image integration"""
+    """
+    AI-powered PPTX generator with proper layer separation:
+    - Layer 1: Slide Background (solid color or gradient)
+    - Layer 2: Images (AI-generated or decorative shapes)
+    - Layer 3: Text elements (titles, content, labels)
+    
+    Each layer is completely independent and editable in PowerPoint.
+    """
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("REPLICATE_API_TOKEN")
         self.llm_url = "https://api.replicate.com/v1/models/meta/meta-llama-3-70b-instruct/predictions"
         self.image_url = "https://api.replicate.com/v1/models/bytedance/seedream-3.0/predictions"
         self.presentation_context = ""
-        self.generated_images = {}  # Cache generated images
         
     async def generate_presentation(
         self, 
@@ -91,44 +52,41 @@ class AIPPTXGenerator:
         output_path: str,
         generate_images: bool = True
     ) -> str:
-        """Generate presentation with AI-designed slides and images"""
+        """Generate presentation with properly separated layers"""
         
-        # Create presentation (16:9 widescreen)
+        # Create widescreen presentation
         prs = Presentation()
         prs.slide_width = Inches(13.333)
         prs.slide_height = Inches(7.5)
         
-        # Build context from all slides
+        # Build context
         all_content = []
         for slide in slides_data:
             texts = self._extract_texts(slide.get('original_content', []))
             all_content.extend(texts[:3])
         self.presentation_context = " | ".join(all_content[:10])[:500]
         
-        # Determine overall theme/mood for consistency
-        overall_mood = await self._analyze_overall_mood(self.presentation_context)
-        
-        # Generate each slide
+        # Generate each slide with separated layers
         total = len(slides_data)
         for i, slide_data in enumerate(slides_data):
-            print(f"[AI Generator] Creating slide {i+1}/{total}...")
+            print(f"[AI Generator] Creating slide {i+1}/{total} with layer separation...")
             
-            # Get AI design with image instructions
-            design = await self._get_ai_design_with_image(slide_data, i, total, overall_mood)
+            # Get design config
+            design = await self._get_design_config(slide_data, i, total)
             
-            # Generate image if needed
+            # Generate image if requested
             image_path = None
             if generate_images and design.get('image_prompt'):
-                image_path = await self._generate_slide_image(design, i)
+                image_path = await self._generate_image(design.get('image_prompt'), i)
             
-            # Create the slide with perfect text-image blend
-            self._create_blended_slide(prs, slide_data, design, image_path, i, total)
+            # Create slide with SEPARATED LAYERS
+            self._create_layered_slide(prs, slide_data, design, image_path, i, total)
         
         prs.save(output_path)
         return output_path
     
     def _extract_texts(self, original_content: List) -> List[str]:
-        """Extract text items from content"""
+        """Extract clean text items"""
         texts = []
         skip_types = ['sldNum', 'ftr', 'dt', 'hdr']
         
@@ -145,198 +103,173 @@ class AIPPTXGenerator:
         
         return texts
     
-    async def _analyze_overall_mood(self, context: str) -> Dict:
-        """Analyze the overall presentation mood for consistency"""
-        # Default mood palette
-        return {
-            "primary": "#1e3a5f",
-            "accent": "#00d4aa",
-            "mood": "professional",
-            "image_style": "abstract geometric shapes, professional, modern, clean lines"
-        }
-    
-    async def _get_ai_design_with_image(
-        self, 
-        slide_data: Dict, 
-        index: int, 
-        total: int,
-        overall_mood: Dict
-    ) -> Dict:
-        """Get AI design instructions including image generation prompt"""
+    async def _get_design_config(self, slide_data: Dict, index: int, total: int) -> Dict:
+        """Get design configuration for the slide"""
         texts = self._extract_texts(slide_data.get('original_content', []))
-        content_summary = "\n".join([f"- {t[:100]}" for t in texts[:8]])
         
-        position = "first (title slide)" if index == 0 else \
-                   "last (closing slide)" if index == total - 1 else \
-                   f"middle ({index + 1})"
-        
-        # Try AI, fallback to smart defaults
-        try:
-            if self.api_key:
-                design = await self._call_llm(content_summary, position, total)
-                if design:
-                    return design
-        except Exception as e:
-            print(f"[AI Generator] LLM call failed: {e}")
-        
-        # Smart fallback with image prompts
-        return self._get_smart_design(index, total, texts, overall_mood)
-    
-    async def _call_llm(self, content: str, position: str, total: int) -> Optional[Dict]:
-        """Call LLM for design instructions"""
-        prompt = DESIGN_WITH_IMAGE_PROMPT.format(
-            content=content,
-            position=position,
-            total=total,
-            context=self.presentation_context[:300]
-        )
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                self.llm_url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={"input": {"prompt": prompt, "max_tokens": 1000, "temperature": 0.7}}
-            )
-            
-            if response.status_code != 201:
-                raise Exception(f"API error: {response.status_code}")
-            
-            result = response.json()
-            prediction_url = result.get('urls', {}).get('get')
-            
-            for _ in range(30):
-                await asyncio.sleep(1)
-                poll = await client.get(prediction_url, headers={"Authorization": f"Bearer {self.api_key}"})
-                poll_result = poll.json()
-                
-                if poll_result.get('status') == 'succeeded':
-                    output = poll_result.get('output', '')
-                    if isinstance(output, list):
-                        output = ''.join(output)
-                    return self._parse_json(output)
-                elif poll_result.get('status') == 'failed':
-                    raise Exception("Prediction failed")
-            
-            raise Exception("Timeout")
-    
-    def _parse_json(self, text: str) -> Dict:
-        """Parse JSON from AI response"""
-        text = text.strip()
-        if '```json' in text:
-            start = text.find('```json') + 7
-            end = text.find('```', start)
-            text = text[start:end].strip()
-        elif '```' in text:
-            start = text.find('```') + 3
-            end = text.find('```', start)
-            text = text[start:end].strip()
-        
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        if start != -1 and end > start:
-            return json.loads(text[start:end])
-        raise ValueError("No JSON found")
-    
-    def _get_smart_design(self, index: int, total: int, texts: List[str], mood: Dict) -> Dict:
-        """Generate smart design with image prompts based on content"""
+        # Smart defaults based on position and content
         is_first = index == 0
         is_last = index == total - 1
+        content_count = len(texts)
         
-        # Analyze content for image prompt
-        content_text = " ".join(texts[:3]).lower()
-        
-        # Generate contextual image prompts
-        image_prompts = {
-            "learning": "abstract flowing lines representing knowledge transfer, blue and teal gradient, professional",
-            "error": "geometric pattern showing correction and improvement, structured shapes, warm colors",
-            "process": "interconnected nodes and pathways, systematic flow diagram style, modern blue",
-            "leadership": "ascending geometric shapes suggesting growth and direction, bold colors",
-            "team": "overlapping circles representing collaboration, harmonious colors",
-            "change": "dynamic arrows and transformation shapes, gradient from old to new",
-            "analysis": "data visualization abstract, charts and graphs stylized, professional blue",
-            "default": "abstract professional background, subtle geometric patterns, corporate blue gradient"
-        }
-        
-        # Choose image prompt based on content
-        image_prompt = image_prompts["default"]
-        for keyword, prompt in image_prompts.items():
-            if keyword in content_text:
-                image_prompt = prompt
-                break
-        
-        # Color palettes that work well with images
-        palettes = [
-            {"bg": "#0f172a", "primary": "#3b82f6", "accent": "#22d3ee", "text": "#ffffff", "overlay": "#0f172aCC"},
-            {"bg": "#1e1b4b", "primary": "#8b5cf6", "accent": "#f472b6", "text": "#ffffff", "overlay": "#1e1b4bCC"},
-            {"bg": "#14532d", "primary": "#22c55e", "accent": "#fbbf24", "text": "#ffffff", "overlay": "#14532dCC"},
-            {"bg": "#7c2d12", "primary": "#f97316", "accent": "#fcd34d", "text": "#ffffff", "overlay": "#7c2d12CC"},
-            {"bg": "#1e3a5f", "primary": "#0ea5e9", "accent": "#2dd4bf", "text": "#ffffff", "overlay": "#1e3a5fCC"},
+        # Color schemes (dark backgrounds for professional look)
+        schemes = [
+            {"bg": "#0f172a", "accent": "#3b82f6", "accent2": "#22d3ee", "text": "#ffffff"},
+            {"bg": "#1e1b4b", "accent": "#8b5cf6", "accent2": "#f472b6", "text": "#ffffff"},
+            {"bg": "#14532d", "accent": "#22c55e", "accent2": "#a3e635", "text": "#ffffff"},
+            {"bg": "#7c2d12", "accent": "#f97316", "accent2": "#fbbf24", "text": "#ffffff"},
+            {"bg": "#1e3a5f", "accent": "#0ea5e9", "accent2": "#2dd4bf", "text": "#ffffff"},
         ]
-        palette = palettes[index % len(palettes)]
+        scheme = schemes[index % len(schemes)]
         
+        # Determine layout and image needs
         if is_first:
             return {
-                "layout": "hero_image",
-                "image_prompt": f"dramatic {image_prompt}, wide cinematic composition, dark overlay ready",
-                "image_position": "background",
-                "image_opacity": 0.4,
-                "text_area": {"position": "center", "has_overlay": True, "overlay_color": palette["overlay"]},
-                "colors": {"primary": palette["primary"], "accent": palette["accent"], "text": "#ffffff", "text_secondary": "#ffffffCC"},
-                "title": {"text": texts[0][:50] if texts else "Presentation", "size": 52, "position": "center"},
-                "mood": "bold",
-                "blend_style": "gradient-fade"
+                "layout": "hero",
+                "background": {"color": scheme["bg"], "type": "solid"},
+                "image": {
+                    "enabled": True,
+                    "position": "right",  # Image on right, text on left
+                    "width": 6,
+                    "height": 7.5,
+                    "x": 7.333,
+                    "y": 0
+                },
+                "image_prompt": self._generate_image_prompt(texts, "hero"),
+                "text": {
+                    "title": texts[0][:50] if texts else "Presentation",
+                    "subtitle": texts[1][:80] if len(texts) > 1 else "",
+                    "position": "left",
+                    "title_size": 48,
+                    "title_x": 0.8,
+                    "title_y": 2.5,
+                    "title_width": 6
+                },
+                "colors": scheme,
+                "decorations": [
+                    {"type": "accent_line", "x": 0.8, "y": 4.0, "w": 2, "h": 0.06}
+                ]
             }
         elif is_last:
             return {
-                "layout": "hero_image",
-                "image_prompt": f"inspiring {image_prompt}, uplifting composition, space for text in center",
-                "image_position": "background",
-                "image_opacity": 0.3,
-                "text_area": {"position": "center", "has_overlay": True, "overlay_color": palette["overlay"]},
-                "colors": {"primary": palette["primary"], "accent": palette["accent"], "text": "#ffffff", "text_secondary": "#ffffffCC"},
-                "title": {"text": "Thank You", "size": 54, "position": "center"},
-                "mood": "professional",
-                "blend_style": "gradient-fade"
+                "layout": "closing",
+                "background": {"color": scheme["bg"], "type": "solid"},
+                "image": {
+                    "enabled": True,
+                    "position": "background_accent",
+                    "width": 5,
+                    "height": 5,
+                    "x": 9,
+                    "y": 3
+                },
+                "image_prompt": self._generate_image_prompt(texts, "closing"),
+                "text": {
+                    "title": "Thank You",
+                    "subtitle": texts[0][:60] if texts else "Questions?",
+                    "position": "center",
+                    "title_size": 54,
+                    "title_x": 0.5,
+                    "title_y": 2.8,
+                    "title_width": 12.333
+                },
+                "colors": scheme,
+                "decorations": [
+                    {"type": "circle", "x": -1, "y": -1, "size": 4},
+                    {"type": "accent_line", "x": 5.5, "y": 5.2, "w": 2.333, "h": 0.06}
+                ]
             }
-        elif len(texts) > 5:
+        elif content_count > 6:
             return {
-                "layout": "corner_image",
-                "image_prompt": f"small accent {image_prompt}, corner composition, minimal",
-                "image_position": "top-right",
-                "image_opacity": 0.8,
-                "text_area": {"position": "left", "has_overlay": False, "overlay_color": None},
-                "colors": {"primary": palette["primary"], "accent": palette["accent"], "text": "#ffffff", "text_secondary": "#ffffffB3"},
-                "title": {"text": texts[0][:45] if texts else "", "size": 32, "position": "top-left"},
-                "mood": "professional",
-                "blend_style": "side-by-side"
+                "layout": "grid",
+                "background": {"color": scheme["bg"], "type": "solid"},
+                "image": {
+                    "enabled": True,
+                    "position": "corner",
+                    "width": 3.5,
+                    "height": 3,
+                    "x": 9.5,
+                    "y": 0
+                },
+                "image_prompt": self._generate_image_prompt(texts, "accent"),
+                "text": {
+                    "title": texts[0][:45] if texts else "",
+                    "content": texts[1:7],
+                    "position": "full",
+                    "title_size": 32,
+                    "title_x": 0.6,
+                    "title_y": 0.5,
+                    "title_width": 8
+                },
+                "colors": scheme,
+                "decorations": [
+                    {"type": "top_bar", "h": 0.08}
+                ]
             }
         else:
             return {
-                "layout": "split_image",
-                "image_prompt": f"{image_prompt}, vertical composition, clean edges",
-                "image_position": "right",
-                "image_opacity": 1.0,
-                "text_area": {"position": "left", "has_overlay": False, "overlay_color": None},
-                "colors": {"primary": palette["primary"], "accent": palette["accent"], "text": "#ffffff", "text_secondary": "#ffffffB3"},
-                "title": {"text": texts[0][:45] if texts else "", "size": 32, "position": "top-left"},
-                "mood": "professional",
-                "blend_style": "side-by-side"
+                "layout": "split",
+                "background": {"color": scheme["bg"], "type": "solid"},
+                "image": {
+                    "enabled": True,
+                    "position": "right_panel",
+                    "width": 5.5,
+                    "height": 7.5,
+                    "x": 7.833,
+                    "y": 0
+                },
+                "image_prompt": self._generate_image_prompt(texts, "content"),
+                "text": {
+                    "title": texts[0][:45] if texts else "",
+                    "content": texts[1:6],
+                    "position": "left",
+                    "title_size": 32,
+                    "title_x": 0.6,
+                    "title_y": 0.6,
+                    "title_width": 6.5
+                },
+                "colors": scheme,
+                "decorations": [
+                    {"type": "left_bar", "w": 0.12},
+                    {"type": "top_bar", "h": 0.08}
+                ]
             }
     
-    async def _generate_slide_image(self, design: Dict, slide_index: int) -> Optional[str]:
+    def _generate_image_prompt(self, texts: List[str], style: str) -> str:
+        """Generate contextual image prompt"""
+        content = " ".join(texts[:3]).lower()
+        
+        base_prompts = {
+            "hero": "dramatic abstract composition, professional, cinematic lighting, ",
+            "closing": "uplifting abstract shapes, celebration of achievement, ",
+            "accent": "subtle geometric pattern, corner accent, ",
+            "content": "abstract professional background, vertical composition, "
+        }
+        
+        # Content-aware additions
+        keywords = {
+            "learn": "flowing knowledge streams, education concept",
+            "error": "problem-solving visualization, correction arrows",
+            "process": "interconnected nodes, workflow diagram style",
+            "leader": "ascending peaks, growth trajectory",
+            "team": "collaborative circles, unity shapes",
+            "change": "transformation morphing shapes",
+            "analy": "data visualization abstract, chart elements"
+        }
+        
+        base = base_prompts.get(style, base_prompts["content"])
+        addition = "modern corporate aesthetic"
+        
+        for key, prompt in keywords.items():
+            if key in content:
+                addition = prompt
+                break
+        
+        return f"{base}{addition}, no text, high quality, 4k"
+    
+    async def _generate_image(self, prompt: str, slide_index: int) -> Optional[str]:
         """Generate image using Seedream-3"""
         if not self.api_key:
             return None
-        
-        image_prompt = design.get('image_prompt', '')
-        if not image_prompt:
-            return None
-        
-        # Enhance prompt for better results
-        enhanced_prompt = f"{image_prompt}, high quality, 4k, professional presentation background, no text, abstract"
         
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -348,7 +281,7 @@ class AIPPTXGenerator:
                     },
                     json={
                         "input": {
-                            "prompt": enhanced_prompt,
+                            "prompt": prompt,
                             "num_outputs": 1,
                             "aspect_ratio": "16:9",
                             "output_format": "png"
@@ -363,8 +296,7 @@ class AIPPTXGenerator:
                 result = response.json()
                 prediction_url = result.get('urls', {}).get('get')
                 
-                # Poll for result
-                for _ in range(60):  # Wait up to 60 seconds
+                for _ in range(60):
                     await asyncio.sleep(2)
                     poll = await client.get(
                         prediction_url,
@@ -376,26 +308,23 @@ class AIPPTXGenerator:
                         output = poll_result.get('output')
                         if output:
                             image_url = output[0] if isinstance(output, list) else output
-                            # Download and save image
                             img_response = await client.get(image_url)
                             if img_response.status_code == 200:
                                 temp_path = tempfile.mktemp(suffix='.png')
                                 with open(temp_path, 'wb') as f:
                                     f.write(img_response.content)
-                                print(f"[Image Gen] Generated image for slide {slide_index + 1}")
+                                print(f"[Image Gen] Created image for slide {slide_index + 1}")
                                 return temp_path
                     elif poll_result.get('status') == 'failed':
-                        print(f"[Image Gen] Generation failed")
                         return None
                 
-                print(f"[Image Gen] Timeout for slide {slide_index + 1}")
                 return None
                 
         except Exception as e:
             print(f"[Image Gen] Error: {e}")
             return None
     
-    def _create_blended_slide(
+    def _create_layered_slide(
         self, 
         prs: Presentation, 
         slide_data: Dict, 
@@ -404,123 +333,127 @@ class AIPPTXGenerator:
         index: int,
         total: int
     ):
-        """Create a slide with perfectly blended image and text"""
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        """
+        Create slide with properly separated layers:
+        1. BACKGROUND LAYER - Slide background fill
+        2. IMAGE LAYER - Pictures and decorative shapes
+        3. TEXT LAYER - All text elements on top
+        """
+        slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank layout
         texts = self._extract_texts(slide_data.get('original_content', []))
-        
         colors = design.get('colors', {})
-        bg_color = colors.get('primary', '#1e3a5f')
-        text_color = colors.get('text', '#ffffff')
-        accent_color = colors.get('accent', '#22d3ee')
         
-        layout = design.get('layout', 'cards')
-        image_position = design.get('image_position', 'right')
-        text_area = design.get('text_area', {})
+        # ============================================
+        # LAYER 1: BACKGROUND (Slide background fill)
+        # ============================================
+        bg_config = design.get('background', {})
+        bg_color = bg_config.get('color', '#1e3a5f')
         
-        # Step 1: Set background color
-        self._set_background(slide, bg_color)
+        background = slide.background
+        fill = background.fill
+        fill.solid()
+        fill.fore_color.rgb = hex_to_rgb(bg_color)
         
-        # Step 2: Add image if available
-        if image_path and os.path.exists(image_path):
-            self._add_blended_image(slide, image_path, design)
-        else:
-            # Add decorative shapes as fallback
-            self._add_decorative_shapes(slide, colors, layout)
+        print(f"  [Layer 1] Background: {bg_color}")
         
-        # Step 3: Add overlay for text readability if needed
-        if text_area.get('has_overlay') and text_area.get('overlay_color'):
-            self._add_text_overlay(slide, design)
+        # ============================================
+        # LAYER 2: IMAGES AND DECORATIVE SHAPES
+        # ============================================
+        image_config = design.get('image', {})
         
-        # Step 4: Add text content in designated area
-        title_config = design.get('title', {})
-        title_text = title_config.get('text', texts[0] if texts else '')
-        
-        self._add_blended_text(slide, title_text, texts[1:], design, colors)
-        
-        # Step 5: Add accent elements
-        self._add_accent_elements(slide, colors, layout, index, total)
-    
-    def _set_background(self, slide, color: str):
-        """Set slide background"""
-        if color.startswith('#'):
-            fill = slide.background.fill
-            fill.solid()
-            fill.fore_color.rgb = hex_to_rgb(color)
-    
-    def _add_blended_image(self, slide, image_path: str, design: Dict):
-        """Add image with proper positioning for text blend"""
-        position = design.get('image_position', 'background')
-        opacity = design.get('image_opacity', 0.5)
-        
-        if position == 'background':
-            # Full background image
-            slide.shapes.add_picture(
-                image_path,
-                Inches(0), Inches(0),
-                width=Inches(13.333), height=Inches(7.5)
-            )
-        elif position == 'right':
-            # Right side (60% width)
-            slide.shapes.add_picture(
-                image_path,
-                Inches(5.5), Inches(0),
-                width=Inches(7.833), height=Inches(7.5)
-            )
-        elif position == 'left':
-            # Left side
-            slide.shapes.add_picture(
-                image_path,
-                Inches(0), Inches(0),
-                width=Inches(6.5), height=Inches(7.5)
-            )
-        elif position == 'top-right':
-            # Corner accent
-            slide.shapes.add_picture(
-                image_path,
-                Inches(8), Inches(0),
-                width=Inches(5.333), height=Inches(4)
-            )
-        elif position == 'bottom-left':
-            slide.shapes.add_picture(
-                image_path,
-                Inches(0), Inches(4),
-                width=Inches(5), height=Inches(3.5)
-            )
-    
-    def _add_decorative_shapes(self, slide, colors: Dict, layout: str):
-        """Add decorative shapes when no image is available"""
-        accent = colors.get('accent', '#22d3ee')
-        primary = colors.get('primary', '#1e3a5f')
-        
-        if layout in ['hero_image', 'full_background']:
-            # Large accent circle (top-right)
-            circle1 = slide.shapes.add_shape(
-                MSO_SHAPE.OVAL,
-                Inches(9), Inches(-2),
-                Inches(6), Inches(6)
-            )
-            circle1.fill.solid()
-            circle1.fill.fore_color.rgb = hex_to_rgb(accent)
-            circle1.fill.fore_color.brightness = 0.3
-            circle1.line.fill.background()
+        # Add AI-generated image if available
+        if image_path and os.path.exists(image_path) and image_config.get('enabled'):
+            img_x = image_config.get('x', 7)
+            img_y = image_config.get('y', 0)
+            img_w = image_config.get('width', 6)
+            img_h = image_config.get('height', 7.5)
             
-            # Small accent (bottom-left)
+            slide.shapes.add_picture(
+                image_path,
+                Inches(img_x), Inches(img_y),
+                width=Inches(img_w), height=Inches(img_h)
+            )
+            print(f"  [Layer 2] Image: {img_w}x{img_h} at ({img_x}, {img_y})")
+        else:
+            # Add decorative shapes as image replacement
+            self._add_decorative_shapes(slide, design, colors)
+            print(f"  [Layer 2] Decorative shapes (no image)")
+        
+        # Add decoration elements (accent bars, circles)
+        for deco in design.get('decorations', []):
+            self._add_decoration(slide, deco, colors)
+        
+        # ============================================
+        # LAYER 3: TEXT ELEMENTS (Always on top)
+        # ============================================
+        text_config = design.get('text', {})
+        layout = design.get('layout', 'split')
+        
+        # Title (separate text box)
+        title = text_config.get('title', '')
+        if title:
+            self._add_title_text(slide, title, text_config, colors)
+            print(f"  [Layer 3] Title: '{title[:30]}...'")
+        
+        # Subtitle or content
+        if layout in ['hero', 'closing']:
+            subtitle = text_config.get('subtitle', '')
+            if subtitle:
+                self._add_subtitle_text(slide, subtitle, text_config, colors)
+                print(f"  [Layer 3] Subtitle: '{subtitle[:30]}...'")
+        else:
+            content = text_config.get('content', texts[1:6])
+            if content:
+                self._add_content_cards(slide, content, text_config, colors, layout)
+                print(f"  [Layer 3] Content: {len(content)} items")
+    
+    def _add_decorative_shapes(self, slide, design: Dict, colors: Dict):
+        """Add decorative shapes as image layer replacement"""
+        layout = design.get('layout', 'split')
+        accent = colors.get('accent', '#3b82f6')
+        accent2 = colors.get('accent2', '#22d3ee')
+        
+        if layout == 'hero':
+            # Large accent circle (right side)
+            circle = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(8), Inches(-1),
+                Inches(7), Inches(7)
+            )
+            circle.fill.solid()
+            circle.fill.fore_color.rgb = hex_to_rgb(accent)
+            circle.fill.fore_color.brightness = 0.3
+            circle.line.fill.background()
+            
+            # Smaller accent
             circle2 = slide.shapes.add_shape(
                 MSO_SHAPE.OVAL,
-                Inches(-1), Inches(5),
+                Inches(10), Inches(5),
                 Inches(4), Inches(4)
             )
             circle2.fill.solid()
-            circle2.fill.fore_color.rgb = hex_to_rgb(accent)
+            circle2.fill.fore_color.rgb = hex_to_rgb(accent2)
             circle2.fill.fore_color.brightness = 0.2
             circle2.line.fill.background()
-        
-        elif layout == 'split_image':
-            # Right panel
+            
+        elif layout == 'closing':
+            # Large background accent
+            circle = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(9), Inches(3),
+                Inches(6), Inches(6)
+            )
+            circle.fill.solid()
+            circle.fill.fore_color.rgb = hex_to_rgb(accent)
+            circle.fill.fore_color.brightness = 0.25
+            circle.line.fill.background()
+            
+        elif layout == 'split':
+            # Right panel decoration
             panel = slide.shapes.add_shape(
                 MSO_SHAPE.RECTANGLE,
-                Inches(6.5), Inches(0),
-                Inches(6.833), Inches(7.5)
+                Inches(7.833), Inches(0),
+                Inches(5.5), Inches(7.5)
             )
             panel.fill.solid()
             panel.fill.fore_color.rgb = hex_to_rgb(accent)
@@ -528,169 +461,174 @@ class AIPPTXGenerator:
             panel.line.fill.background()
             
             # Decorative circles on panel
-            for i, (x, y, s) in enumerate([(8, 1, 2), (10, 4, 1.5), (7, 5, 1)]):
+            for x, y, s in [(9, 1.5, 2), (11, 4, 1.5), (8.5, 5.5, 1)]:
                 c = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(y), Inches(s), Inches(s))
                 c.fill.solid()
                 c.fill.fore_color.rgb = RGBColor(255, 255, 255)
-                c.fill.fore_color.brightness = 0.7 + i * 0.1
+                c.fill.fore_color.brightness = 0.75
                 c.line.fill.background()
-        
-        elif layout == 'corner_image':
+                
+        elif layout == 'grid':
             # Corner accent
             corner = slide.shapes.add_shape(
                 MSO_SHAPE.OVAL,
                 Inches(10), Inches(-1),
-                Inches(4.5), Inches(4.5)
+                Inches(4.5), Inches(4)
             )
             corner.fill.solid()
             corner.fill.fore_color.rgb = hex_to_rgb(accent)
-            corner.fill.fore_color.brightness = 0.3
+            corner.fill.fore_color.brightness = 0.35
             corner.line.fill.background()
     
-    def _add_text_overlay(self, slide, design: Dict):
-        """Add semi-transparent overlay for text readability"""
-        text_area = design.get('text_area', {})
-        position = text_area.get('position', 'center')
+    def _add_decoration(self, slide, deco: Dict, colors: Dict):
+        """Add accent decorations"""
+        deco_type = deco.get('type', '')
+        accent = colors.get('accent', '#3b82f6')
         
-        if position == 'center':
-            # Center gradient overlay
-            overlay = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(0), Inches(1.5),
-                Inches(13.333), Inches(4.5)
-            )
-        elif position == 'left':
-            overlay = slide.shapes.add_shape(
+        if deco_type == 'top_bar':
+            bar = slide.shapes.add_shape(
                 MSO_SHAPE.RECTANGLE,
                 Inches(0), Inches(0),
-                Inches(6), Inches(7.5)
+                Inches(13.333), Inches(deco.get('h', 0.08))
             )
-        elif position == 'bottom':
-            overlay = slide.shapes.add_shape(
+            bar.fill.solid()
+            bar.fill.fore_color.rgb = hex_to_rgb(accent)
+            bar.line.fill.background()
+            
+        elif deco_type == 'left_bar':
+            bar = slide.shapes.add_shape(
                 MSO_SHAPE.RECTANGLE,
-                Inches(0), Inches(4),
-                Inches(13.333), Inches(3.5)
+                Inches(0), Inches(0),
+                Inches(deco.get('w', 0.12)), Inches(7.5)
             )
-        else:
-            return
-        
-        overlay.fill.solid()
-        overlay.fill.fore_color.rgb = RGBColor(0, 0, 0)
-        overlay.fill.fore_color.brightness = -0.5
-        overlay.line.fill.background()
+            bar.fill.solid()
+            bar.fill.fore_color.rgb = hex_to_rgb(accent)
+            bar.line.fill.background()
+            
+        elif deco_type == 'accent_line':
+            line = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(deco.get('x', 0)), Inches(deco.get('y', 0)),
+                Inches(deco.get('w', 2)), Inches(deco.get('h', 0.06))
+            )
+            line.fill.solid()
+            line.fill.fore_color.rgb = hex_to_rgb(accent)
+            line.line.fill.background()
+            
+        elif deco_type == 'circle':
+            circle = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(deco.get('x', 0)), Inches(deco.get('y', 0)),
+                Inches(deco.get('size', 3)), Inches(deco.get('size', 3))
+            )
+            circle.fill.solid()
+            circle.fill.fore_color.rgb = hex_to_rgb(colors.get('accent2', accent))
+            circle.fill.fore_color.brightness = 0.2
+            circle.line.fill.background()
     
-    def _add_blended_text(self, slide, title: str, body_texts: List[str], design: Dict, colors: Dict):
-        """Add text positioned to blend with image"""
-        text_area = design.get('text_area', {})
-        position = text_area.get('position', 'left')
-        layout = design.get('layout', 'cards')
+    def _add_title_text(self, slide, title: str, config: Dict, colors: Dict):
+        """Add title as separate text layer"""
+        x = config.get('title_x', 0.8)
+        y = config.get('title_y', 2.5)
+        w = config.get('title_width', 10)
+        size = config.get('title_size', 42)
+        position = config.get('position', 'left')
         
+        title_box = slide.shapes.add_textbox(
+            Inches(x), Inches(y),
+            Inches(w), Inches(1.5)
+        )
+        tf = title_box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = title
+        p.font.size = Pt(size)
+        p.font.bold = True
+        p.font.color.rgb = hex_to_rgb(colors.get('text', '#ffffff'))
+        
+        if position == 'center':
+            p.alignment = PP_ALIGN.CENTER
+    
+    def _add_subtitle_text(self, slide, subtitle: str, config: Dict, colors: Dict):
+        """Add subtitle as separate text layer"""
+        x = config.get('title_x', 0.8)
+        y = config.get('title_y', 2.5) + 1.5
+        w = config.get('title_width', 10)
+        position = config.get('position', 'left')
+        
+        sub_box = slide.shapes.add_textbox(
+            Inches(x), Inches(y),
+            Inches(w), Inches(1)
+        )
+        tf = sub_box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = subtitle
+        p.font.size = Pt(20)
+        p.font.color.rgb = hex_to_rgb(colors.get('text', '#ffffff'))
+        
+        if position == 'center':
+            p.alignment = PP_ALIGN.CENTER
+    
+    def _add_content_cards(self, slide, items: List[str], config: Dict, colors: Dict, layout: str):
+        """Add content items as separate text elements with card styling"""
+        accent = colors.get('accent', '#3b82f6')
         text_color = colors.get('text', '#ffffff')
-        accent_color = colors.get('accent', '#22d3ee')
-        title_size = design.get('title', {}).get('size', 32)
         
-        # Determine text positions based on layout
-        if layout in ['hero_image', 'full_background'] or position == 'center':
-            title_x, title_y, title_w = 0.8, 2.5, 11.7
-            body_x, body_y, body_w = 0.8, 4.0, 11.7
-            center_align = True
-        elif position == 'left' or layout == 'split_image':
-            title_x, title_y, title_w = 0.6, 0.8, 5.5
-            body_x, body_y, body_w = 0.6, 1.8, 5.5
-            center_align = False
+        if layout == 'grid':
+            self._add_grid_cards(slide, items, colors)
         else:
-            title_x, title_y, title_w = 0.6, 0.6, 7
-            body_x, body_y, body_w = 0.6, 1.6, 7
-            center_align = False
-        
-        # Add title
-        if title:
-            title_box = slide.shapes.add_textbox(
-                Inches(title_x), Inches(title_y),
-                Inches(title_w), Inches(1.5)
-            )
-            tf = title_box.text_frame
-            tf.word_wrap = True
-            p = tf.paragraphs[0]
-            p.text = title[:70]
-            p.font.size = Pt(title_size)
-            p.font.bold = True
-            p.font.color.rgb = hex_to_rgb(text_color)
-            if center_align:
-                p.alignment = PP_ALIGN.CENTER
-        
-        # Add body content based on layout
-        if layout in ['hero_image', 'full_background']:
-            # Simple subtitle for hero slides
-            if body_texts:
-                sub_box = slide.shapes.add_textbox(
-                    Inches(body_x), Inches(body_y + 0.3),
-                    Inches(body_w), Inches(1)
-                )
-                tf = sub_box.text_frame
-                tf.word_wrap = True
-                p = tf.paragraphs[0]
-                p.text = body_texts[0][:100]
-                p.font.size = Pt(20)
-                p.font.color.rgb = hex_to_rgb(colors.get('text_secondary', '#ffffffCC'))
-                if center_align:
-                    p.alignment = PP_ALIGN.CENTER
-        else:
-            # Cards or list for content slides
-            self._add_content_cards(slide, body_texts[:6], body_x, body_y, body_w, colors)
+            self._add_list_cards(slide, items, config, colors)
     
-    def _add_content_cards(
-        self, 
-        slide, 
-        items: List[str], 
-        x: float, 
-        y: float, 
-        width: float,
-        colors: Dict
-    ):
-        """Add content as elegant cards"""
-        accent = colors.get('accent', '#22d3ee')
-        card_height = 0.85
+    def _add_list_cards(self, slide, items: List[str], config: Dict, colors: Dict):
+        """Add items as vertical card list"""
+        accent = colors.get('accent', '#3b82f6')
+        x = config.get('title_x', 0.6)
+        start_y = config.get('title_y', 0.6) + 1.2
+        w = config.get('title_width', 6.5)
         
-        for i, text in enumerate(items):
-            card_y = y + i * (card_height + 0.12)
-            if card_y > 6.2:
+        card_h = 0.85
+        gap = 0.12
+        
+        for i, text in enumerate(items[:6]):
+            y = start_y + i * (card_h + gap)
+            if y > 6.2:
                 break
             
-            # Card background
+            # Card background (IMAGE LAYER)
             card = slide.shapes.add_shape(
                 MSO_SHAPE.ROUNDED_RECTANGLE,
-                Inches(x), Inches(card_y),
-                Inches(width), Inches(card_height)
+                Inches(x), Inches(y),
+                Inches(w), Inches(card_h)
             )
             card.fill.solid()
             card.fill.fore_color.rgb = RGBColor(255, 255, 255)
             card.fill.fore_color.brightness = 0.85
             card.line.fill.background()
             
-            # Left accent bar
+            # Accent bar (IMAGE LAYER)
             bar = slide.shapes.add_shape(
                 MSO_SHAPE.RECTANGLE,
-                Inches(x), Inches(card_y),
-                Inches(0.08), Inches(card_height)
+                Inches(x), Inches(y),
+                Inches(0.08), Inches(card_h)
             )
             bar.fill.solid()
             bar.fill.fore_color.rgb = hex_to_rgb(accent)
             bar.line.fill.background()
             
-            # Number badge
+            # Number badge (IMAGE LAYER)
             badge = slide.shapes.add_shape(
                 MSO_SHAPE.OVAL,
-                Inches(x + 0.2), Inches(card_y + 0.18),
+                Inches(x + 0.2), Inches(y + 0.17),
                 Inches(0.5), Inches(0.5)
             )
             badge.fill.solid()
             badge.fill.fore_color.rgb = hex_to_rgb(accent)
             badge.line.fill.background()
             
-            # Number text
+            # Number text (TEXT LAYER)
             num_box = slide.shapes.add_textbox(
-                Inches(x + 0.2), Inches(card_y + 0.22),
+                Inches(x + 0.2), Inches(y + 0.21),
                 Inches(0.5), Inches(0.45)
             )
             tf = num_box.text_frame
@@ -701,10 +639,10 @@ class AIPPTXGenerator:
             p.font.color.rgb = RGBColor(255, 255, 255)
             p.alignment = PP_ALIGN.CENTER
             
-            # Card text
+            # Content text (TEXT LAYER - separate from card)
             text_box = slide.shapes.add_textbox(
-                Inches(x + 0.85), Inches(card_y + 0.18),
-                Inches(width - 1.1), Inches(card_height - 0.35)
+                Inches(x + 0.85), Inches(y + 0.17),
+                Inches(w - 1.1), Inches(card_h - 0.34)
             )
             tf = text_box.text_frame
             tf.word_wrap = True
@@ -713,31 +651,81 @@ class AIPPTXGenerator:
             p.font.size = Pt(13)
             p.font.color.rgb = RGBColor(30, 30, 50)
     
-    def _add_accent_elements(self, slide, colors: Dict, layout: str, index: int, total: int):
-        """Add finishing accent elements"""
-        accent = colors.get('accent', '#22d3ee')
+    def _add_grid_cards(self, slide, items: List[str], colors: Dict):
+        """Add items as grid of cards"""
+        accent = colors.get('accent', '#3b82f6')
+        accent_colors = [accent, '#f472b6', '#fbbf24', '#22c55e', '#0ea5e9', '#a855f7']
         
-        # Top accent line (except for hero slides)
-        if layout not in ['hero_image', 'full_background']:
-            line = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(0), Inches(0),
-                Inches(13.333), Inches(0.08)
-            )
-            line.fill.solid()
-            line.fill.fore_color.rgb = hex_to_rgb(accent)
-            line.line.fill.background()
+        cols = 3
+        card_w = 3.8
+        card_h = 2.2
+        start_x = 0.5
+        start_y = 1.5
+        gap = 0.3
         
-        # Bottom line for closing
-        if index == total - 1:
-            line = slide.shapes.add_shape(
-                MSO_SHAPE.RECTANGLE,
-                Inches(5.5), Inches(5.5),
-                Inches(2.333), Inches(0.06)
+        for i, text in enumerate(items[:6]):
+            col = i % cols
+            row = i // cols
+            x = start_x + col * (card_w + gap)
+            y = start_y + row * (card_h + gap)
+            
+            color = accent_colors[i % len(accent_colors)]
+            
+            # Card background (IMAGE LAYER)
+            card = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(x), Inches(y),
+                Inches(card_w), Inches(card_h)
             )
-            line.fill.solid()
-            line.fill.fore_color.rgb = hex_to_rgb(accent)
-            line.line.fill.background()
+            card.fill.solid()
+            card.fill.fore_color.rgb = RGBColor(255, 255, 255)
+            card.fill.fore_color.brightness = 0.9
+            card.line.fill.background()
+            
+            # Top accent bar (IMAGE LAYER)
+            top = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(x), Inches(y),
+                Inches(card_w), Inches(0.1)
+            )
+            top.fill.solid()
+            top.fill.fore_color.rgb = hex_to_rgb(color)
+            top.line.fill.background()
+            
+            # Number badge (IMAGE LAYER)
+            badge = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(x + 0.2), Inches(y + 0.3),
+                Inches(0.5), Inches(0.5)
+            )
+            badge.fill.solid()
+            badge.fill.fore_color.rgb = hex_to_rgb(color)
+            badge.line.fill.background()
+            
+            # Number text (TEXT LAYER)
+            num_box = slide.shapes.add_textbox(
+                Inches(x + 0.2), Inches(y + 0.34),
+                Inches(0.5), Inches(0.45)
+            )
+            tf = num_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = str(i + 1)
+            p.font.size = Pt(16)
+            p.font.bold = True
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.alignment = PP_ALIGN.CENTER
+            
+            # Content text (TEXT LAYER - separate)
+            text_box = slide.shapes.add_textbox(
+                Inches(x + 0.15), Inches(y + 0.95),
+                Inches(card_w - 0.3), Inches(card_h - 1.1)
+            )
+            tf = text_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = text[:90]
+            p.font.size = Pt(12)
+            p.font.color.rgb = RGBColor(30, 30, 50)
 
 
 async def generate_ai_presentation(
@@ -746,6 +734,6 @@ async def generate_ai_presentation(
     api_key: str = None,
     generate_images: bool = True
 ) -> str:
-    """Convenience function to generate AI-designed presentation with images"""
+    """Generate AI-designed presentation with separated layers"""
     generator = AIPPTXGenerator(api_key)
     return await generator.generate_presentation(slides_data, output_path, generate_images)
