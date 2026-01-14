@@ -1,15 +1,18 @@
 """
-Professional PPTX Exporter
-Generates high-quality PowerPoint files with proper styling
+World-Class PPTX Exporter
+Creates stunning, professional PowerPoint presentations with modern design
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import nsmap, qn
+import re
 
 
 def hex_to_rgb(hex_color: str) -> RGBColor:
@@ -24,49 +27,97 @@ def hex_to_rgb(hex_color: str) -> RGBColor:
     return RGBColor(0, 0, 0)
 
 
-class PPTXExporter:
-    """Exports redesigned slides to a professional PPTX file"""
+def lighten_color(hex_color: str, factor: float = 0.3) -> str:
+    """Lighten a hex color"""
+    hex_color = hex_color.lstrip('#')
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def darken_color(hex_color: str, factor: float = 0.2) -> str:
+    """Darken a hex color"""
+    hex_color = hex_color.lstrip('#')
+    r = int(int(hex_color[0:2], 16) * (1 - factor))
+    g = int(int(hex_color[2:4], 16) * (1 - factor))
+    b = int(int(hex_color[4:6], 16) * (1 - factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+class WorldClassExporter:
+    """Creates stunning, world-class PowerPoint presentations"""
     
     def __init__(self, style: Dict, slides_data: List[Dict]):
         self.style = style
         self.theme = style.get('theme', {})
         self.typography = style.get('typography', {})
         self.slides_data = slides_data
+        self.slide_count = len(slides_data)
+        
+        # Enhanced color palette
+        self.primary = self.theme.get('primary', '#0077b6')
+        self.accent = self.theme.get('accent', '#00b4d8')
+        self.background = self.theme.get('background', '#ffffff')
+        self.text_color = self.theme.get('text', '#1a1a2e')
+        self.text_muted = self.theme.get('text_muted', '#64748b')
+        self.surface = self.theme.get('surface', '#f8fafc')
+        
+        # Design parameters
+        self.title_font = self.typography.get('heading', 'Segoe UI')
+        self.body_font = self.typography.get('body', 'Segoe UI')
         
         # Create presentation with 16:9 aspect ratio
         self.prs = Presentation()
-        self.prs.slide_width = Inches(10)
-        self.prs.slide_height = Inches(5.625)  # 16:9
+        self.prs.slide_width = Inches(13.333)
+        self.prs.slide_height = Inches(7.5)
         
     def export(self, output_path: str) -> str:
-        """Export all slides to PPTX"""
-        for slide_data in self.slides_data:
-            self._create_slide(slide_data)
+        """Export all slides to PPTX with world-class design"""
+        for i, slide_data in enumerate(self.slides_data):
+            self._create_world_class_slide(slide_data, i)
         
         self.prs.save(output_path)
         return output_path
     
-    def _create_slide(self, slide_data: Dict):
-        """Create a single slide based on layout type"""
+    def _create_world_class_slide(self, slide_data: Dict, index: int):
+        """Create a stunning slide based on content and position"""
         layout_type = slide_data.get('layout_type', 'content')
         original_content = slide_data.get('original_content', [])
         
-        # Debug log
-        print(f"[PPTX Export] Slide {slide_data.get('slide_number', '?')}: layout={layout_type}, content_items={len(original_content)}")
+        # Extract and clean content
+        title, subtitle, body_texts = self._extract_content(original_content)
         
-        # Extract title and body
+        # First slide is always a hero title
+        if index == 0:
+            self._create_hero_title_slide(title, subtitle, body_texts)
+        # Last slide is a closing slide
+        elif index == self.slide_count - 1 and self.slide_count > 2:
+            self._create_stunning_closing_slide(title, body_texts)
+        # Determine best layout based on content
+        elif len(body_texts) >= 6:
+            self._create_grid_content_slide(title, body_texts)
+        elif len(body_texts) >= 4:
+            self._create_two_column_modern_slide(title, body_texts)
+        elif any(self._looks_like_stat(t) for t in body_texts):
+            self._create_stats_showcase_slide(title, body_texts)
+        else:
+            self._create_elegant_content_slide(title, body_texts)
+    
+    def _extract_content(self, original_content: List) -> Tuple[str, str, List[str]]:
+        """Extract and clean content from slide data"""
         title = ""
         subtitle = ""
         body_texts = []
         
-        # Title-like types (from PowerPoint placeholder types)
+        skip_types = ['sldNum', 'ftr', 'dt', 'hdr']
         title_types = ['title', 'ctrTitle', 'TITLE', 'CENTER_TITLE']
         subtitle_types = ['subTitle', 'SUBTITLE', 'subtitle']
-        # Skip these types - they're metadata, not content
-        skip_types = ['sldNum', 'ftr', 'dt', 'hdr']
         
         for item in original_content:
-            # Handle both dict and string items
             if isinstance(item, str):
                 text = item.strip()
                 item_type = 'body'
@@ -74,20 +125,10 @@ class PPTXExporter:
                 item_type = item.get('type', 'body')
                 text = item.get('text', '').strip()
             
-            if not text:
+            if not text or item_type in skip_types:
                 continue
-            
-            # Skip metadata types (slide numbers, footers, dates, headers)
-            if item_type in skip_types:
-                print(f"  -> Skipping metadata: type='{item_type}', text='{text[:30]}...'")
-                continue
-            
-            # Skip items that look like just numbers (slide numbers without proper type)
             if text.isdigit() and len(text) <= 3:
-                print(f"  -> Skipping number: '{text}'")
                 continue
-            
-            print(f"  -> Item type='{item_type}', text='{text[:50]}...'")
                 
             if item_type in title_types and not title:
                 title = text
@@ -96,273 +137,538 @@ class PPTXExporter:
             else:
                 body_texts.append(text)
         
-        # Fallback: If no title found but we have body texts, use first as title
+        # Use first body text as title if none found
         if not title and body_texts:
             title = body_texts.pop(0)
         
-        # Fallback: If still nothing, try to extract from slide_data directly
-        if not title and not body_texts:
-            # Try getting from ai_instructions or html content
-            ai_inst = slide_data.get('ai_instructions', {})
-            if ai_inst:
-                title = ai_inst.get('purpose', '') or f"Slide {slide_data.get('slide_number', '')}"
-        
-        print(f"  -> Final: title='{title[:30] if title else 'None'}', body_count={len(body_texts)}")
-        
-        # Create appropriate slide type
-        if layout_type == 'title':
-            self._create_title_slide(title, subtitle or (body_texts[0] if body_texts else ''))
-        elif layout_type == 'closing':
-            self._create_closing_slide(title or "Thank You", body_texts)
-        elif layout_type == 'section_break':
-            self._create_section_slide(title or "Section")
-        elif layout_type == 'two_column':
-            mid = max(1, len(body_texts) // 2)
-            self._create_two_column_slide(title, body_texts[:mid], body_texts[mid:])
-        elif layout_type == 'stats':
-            self._create_stats_slide(title, body_texts)
-        elif layout_type in ['chart', 'image']:
-            self._create_media_slide(title, body_texts, layout_type)
-        else:
-            self._create_content_slide(title, body_texts)
+        return title, subtitle, body_texts
     
-    def _create_title_slide(self, title: str, subtitle: str = ""):
-        """Create a professional title slide"""
-        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])  # Blank
-        
-        bg = self.theme.get('background', '#ffffff')
-        primary = self.theme.get('primary', '#0077b6')
-        
-        # Set background
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
-        
-        # Determine text colors based on background
-        is_dark = self._is_dark_color(bg)
-        title_color = '#ffffff' if is_dark else self.theme.get('text', '#1a1a2e')
-        subtitle_color = 'rgba(255,255,255,0.8)' if is_dark else self.theme.get('text_muted', '#666666')
-        
-        # Add accent bar
-        accent_color = self.theme.get('accent', primary)
-        self._add_accent_element(slide, self.style.get('layout', {}).get('accent_position', 'left-bar'))
-        
-        # Title
-        if title:
-            title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(9), Inches(1.2))
-            self._format_title_text(title_box, title, title_color, center=True, size=42)
-        
-        # Subtitle
-        if subtitle:
-            sub_box = slide.shapes.add_textbox(Inches(0.5), Inches(3.3), Inches(9), Inches(0.6))
-            self._format_body_text(sub_box, subtitle, subtitle_color if isinstance(subtitle_color, str) and '#' in subtitle_color else '#888888', center=True, size=22)
+    def _looks_like_stat(self, text: str) -> bool:
+        """Check if text looks like a statistic"""
+        return bool(re.search(r'\d+[%$€£]|\d+\s*(percent|million|billion|k\b|m\b)', text.lower()))
     
-    def _create_content_slide(self, title: str, body_texts: List[str]):
-        """Create a standard content slide"""
-        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])  # Blank
+    # ==================== HERO TITLE SLIDE ====================
+    
+    def _create_hero_title_slide(self, title: str, subtitle: str, body_texts: List[str]):
+        """Create a stunning hero title slide"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         
-        bg = self.theme.get('background', '#ffffff')
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
+        # Dark gradient-like background using primary color
+        self._set_slide_background(slide, self.primary)
         
-        primary = self.theme.get('primary', '#0077b6')
-        text_color = self.theme.get('text', '#1a1a2e')
+        # Add geometric accent shapes
+        self._add_hero_decorations(slide)
         
-        # Add accent element
-        self._add_accent_element(slide, self.style.get('layout', {}).get('accent_position', 'left-bar'))
+        # Large accent circle (top right, partially visible)
+        circle = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL, 
+            Inches(10), Inches(-2), 
+            Inches(5), Inches(5)
+        )
+        circle.fill.solid()
+        circle.fill.fore_color.rgb = hex_to_rgb(lighten_color(self.primary, 0.15))
+        circle.line.fill.background()
         
-        # Title
+        # Small accent circle
+        circle2 = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL, 
+            Inches(-1), Inches(5), 
+            Inches(3), Inches(3)
+        )
+        circle2.fill.solid()
+        circle2.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        circle2.line.fill.background()
+        
+        # Title - large and bold
         if title:
-            title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.8), Inches(0.8))
-            self._format_title_text(title_box, title, primary, size=28)
-        
-        # Content area
-        if body_texts:
-            content_box = slide.shapes.add_textbox(Inches(0.6), Inches(1.4), Inches(8.8), Inches(3.8))
-            tf = content_box.text_frame
+            title_box = slide.shapes.add_textbox(Inches(0.8), Inches(2.2), Inches(10), Inches(2))
+            tf = title_box.text_frame
             tf.word_wrap = True
-            
-            for i, text in enumerate(body_texts[:8]):
-                if i == 0:
-                    p = tf.paragraphs[0]
-                else:
-                    p = tf.add_paragraph()
-                
-                # Add bullet character
-                p.text = f"• {text}"
-                p.font.size = Pt(16)
-                p.font.color.rgb = hex_to_rgb(text_color)
-                p.space_after = Pt(10)
-                p.line_spacing = 1.3
+            p = tf.paragraphs[0]
+            p.text = title
+            p.font.size = Pt(54)
+            p.font.bold = True
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.font.name = self.title_font
+        
+        # Subtitle or first body text
+        sub_text = subtitle or (body_texts[0] if body_texts else "")
+        if sub_text:
+            sub_box = slide.shapes.add_textbox(Inches(0.8), Inches(4.4), Inches(8), Inches(1))
+            tf = sub_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = sub_text
+            p.font.size = Pt(22)
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.font.name = self.body_font
+        
+        # Decorative line under title
+        line = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE, 
+            Inches(0.8), Inches(4.1), 
+            Inches(2), Inches(0.06)
+        )
+        line.fill.solid()
+        line.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        line.line.fill.background()
     
-    def _create_two_column_slide(self, title: str, left_texts: List[str], right_texts: List[str]):
-        """Create a two-column content slide"""
+    def _add_hero_decorations(self, slide):
+        """Add subtle geometric decorations to hero slide"""
+        # Top-right corner accent
+        corner = slide.shapes.add_shape(
+            MSO_SHAPE.RIGHT_TRIANGLE,
+            Inches(11.5), Inches(0),
+            Inches(1.833), Inches(1.5)
+        )
+        corner.fill.solid()
+        corner.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        corner.line.fill.background()
+        corner.rotation = 90
+    
+    # ==================== ELEGANT CONTENT SLIDE ====================
+    
+    def _create_elegant_content_slide(self, title: str, body_texts: List[str]):
+        """Create an elegant content slide with modern design"""
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._set_slide_background(slide, self.background)
         
-        bg = self.theme.get('background', '#ffffff')
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
+        # Left accent bar
+        accent_bar = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(0), Inches(0),
+            Inches(0.15), Inches(7.5)
+        )
+        accent_bar.fill.solid()
+        accent_bar.fill.fore_color.rgb = hex_to_rgb(self.primary)
+        accent_bar.line.fill.background()
         
-        primary = self.theme.get('primary', '#0077b6')
-        text_color = self.theme.get('text', '#1a1a2e')
-        border_color = self.theme.get('border', '#e5e7eb')
+        # Section indicator circle
+        circle = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL,
+            Inches(0.4), Inches(0.5),
+            Inches(0.5), Inches(0.5)
+        )
+        circle.fill.solid()
+        circle.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        circle.line.fill.background()
         
-        self._add_accent_element(slide, self.style.get('layout', {}).get('accent_position', 'left-bar'))
+        # Title with accent underline
+        if title:
+            title_box = slide.shapes.add_textbox(Inches(1.2), Inches(0.6), Inches(11), Inches(1.2))
+            tf = title_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            # Clean up title (remove extra parts after common delimiters)
+            clean_title = title.split('.')[0].split('BAGAIMANA')[0].strip()
+            if len(clean_title) > 80:
+                clean_title = clean_title[:77] + "..."
+            p.text = clean_title
+            p.font.size = Pt(36)
+            p.font.bold = True
+            p.font.color.rgb = hex_to_rgb(self.primary)
+            p.font.name = self.title_font
+            
+            # Underline accent
+            underline = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(1.2), Inches(1.7),
+                Inches(1.5), Inches(0.05)
+            )
+            underline.fill.solid()
+            underline.fill.fore_color.rgb = hex_to_rgb(self.accent)
+            underline.line.fill.background()
+        
+        # Content cards
+        if body_texts:
+            self._add_content_cards(slide, body_texts[:6], start_y=2.0)
+    
+    def _add_content_cards(self, slide, items: List[str], start_y: float = 2.0):
+        """Add content as elegant cards"""
+        card_height = 0.75
+        spacing = 0.15
+        
+        for i, text in enumerate(items):
+            y = start_y + i * (card_height + spacing)
+            if y > 6.5:
+                break
+            
+            # Card background
+            card = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(1.2), Inches(y),
+                Inches(11), Inches(card_height)
+            )
+            card.fill.solid()
+            card.fill.fore_color.rgb = hex_to_rgb(self.surface)
+            card.line.fill.background()
+            
+            # Accent indicator
+            indicator = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(1.2), Inches(y),
+                Inches(0.08), Inches(card_height)
+            )
+            indicator.fill.solid()
+            indicator.fill.fore_color.rgb = hex_to_rgb(self.accent)
+            indicator.line.fill.background()
+            
+            # Card text
+            text_box = slide.shapes.add_textbox(
+                Inches(1.5), Inches(y + 0.15),
+                Inches(10.5), Inches(card_height - 0.3)
+            )
+            tf = text_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            # Truncate long text
+            display_text = text if len(text) < 120 else text[:117] + "..."
+            p.text = display_text
+            p.font.size = Pt(15)
+            p.font.color.rgb = hex_to_rgb(self.text_color)
+            p.font.name = self.body_font
+    
+    # ==================== TWO COLUMN MODERN SLIDE ====================
+    
+    def _create_two_column_modern_slide(self, title: str, body_texts: List[str]):
+        """Create a modern two-column layout"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._set_slide_background(slide, self.background)
+        
+        # Top accent bar
+        top_bar = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(0), Inches(0),
+            Inches(13.333), Inches(0.1)
+        )
+        top_bar.fill.solid()
+        top_bar.fill.fore_color.rgb = hex_to_rgb(self.primary)
+        top_bar.line.fill.background()
         
         # Title
         if title:
-            title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.8), Inches(0.8))
-            self._format_title_text(title_box, title, primary, size=28)
+            title_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.5), Inches(1))
+            tf = title_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            clean_title = title.split('.')[0].strip()[:70]
+            p.text = clean_title
+            p.font.size = Pt(32)
+            p.font.bold = True
+            p.font.color.rgb = hex_to_rgb(self.primary)
+            p.font.name = self.title_font
         
-        # Left column
-        left_box = slide.shapes.add_textbox(Inches(0.6), Inches(1.4), Inches(4.2), Inches(3.8))
-        self._add_bullet_list(left_box, left_texts, text_color)
+        # Split content into two columns
+        mid = len(body_texts) // 2
+        left_items = body_texts[:mid] if mid > 0 else body_texts[:2]
+        right_items = body_texts[mid:] if mid > 0 else body_texts[2:]
         
-        # Divider line
-        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(4.95), Inches(1.4), Inches(0.02), Inches(3.5))
-        line.fill.solid()
-        line.fill.fore_color.rgb = hex_to_rgb(border_color)
-        line.line.fill.background()
+        # Left column header
+        left_header = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(0.8), Inches(1.7),
+            Inches(5.5), Inches(0.5)
+        )
+        left_header.fill.solid()
+        left_header.fill.fore_color.rgb = hex_to_rgb(self.primary)
+        left_header.line.fill.background()
         
-        # Right column
-        right_box = slide.shapes.add_textbox(Inches(5.2), Inches(1.4), Inches(4.2), Inches(3.8))
-        self._add_bullet_list(right_box, right_texts, text_color)
+        # Left content
+        self._add_column_items(slide, left_items[:4], x=0.8, start_y=2.4)
+        
+        # Right column header
+        right_header = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(6.9), Inches(1.7),
+            Inches(5.5), Inches(0.5)
+        )
+        right_header.fill.solid()
+        right_header.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        right_header.line.fill.background()
+        
+        # Right content
+        self._add_column_items(slide, right_items[:4], x=6.9, start_y=2.4)
     
-    def _create_closing_slide(self, title: str, body_texts: List[str]):
-        """Create a closing/thank you slide"""
+    def _add_column_items(self, slide, items: List[str], x: float, start_y: float):
+        """Add items to a column with icons"""
+        for i, text in enumerate(items):
+            y = start_y + i * 1.2
+            
+            # Icon circle
+            icon = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(x), Inches(y),
+                Inches(0.4), Inches(0.4)
+            )
+            icon.fill.solid()
+            icon.fill.fore_color.rgb = hex_to_rgb(lighten_color(self.primary, 0.7))
+            icon.line.fill.background()
+            
+            # Number in icon
+            num_box = slide.shapes.add_textbox(Inches(x), Inches(y + 0.05), Inches(0.4), Inches(0.35))
+            tf = num_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = str(i + 1)
+            p.font.size = Pt(14)
+            p.font.bold = True
+            p.font.color.rgb = hex_to_rgb(self.primary)
+            p.alignment = PP_ALIGN.CENTER
+            
+            # Text
+            text_box = slide.shapes.add_textbox(Inches(x + 0.55), Inches(y), Inches(4.8), Inches(1))
+            tf = text_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = text[:100] if len(text) > 100 else text
+            p.font.size = Pt(14)
+            p.font.color.rgb = hex_to_rgb(self.text_color)
+            p.font.name = self.body_font
+    
+    # ==================== GRID CONTENT SLIDE ====================
+    
+    def _create_grid_content_slide(self, title: str, body_texts: List[str]):
+        """Create a grid layout for many items"""
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._set_slide_background(slide, self.background)
         
-        primary = self.theme.get('primary', '#0077b6')
-        self._set_slide_background(slide, primary)
+        # Side accent
+        side_accent = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(12.833), Inches(0),
+            Inches(0.5), Inches(7.5)
+        )
+        side_accent.fill.solid()
+        side_accent.fill.fore_color.rgb = hex_to_rgb(self.primary)
+        side_accent.line.fill.background()
+        
+        # Title
+        if title:
+            title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(11.5), Inches(0.9))
+            tf = title_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = title.split('.')[0].strip()[:60]
+            p.font.size = Pt(30)
+            p.font.bold = True
+            p.font.color.rgb = hex_to_rgb(self.primary)
+            p.font.name = self.title_font
+        
+        # Create 2x3 or 3x2 grid
+        items = body_texts[:6]
+        cols = 3
+        rows = 2
+        card_width = 3.8
+        card_height = 2.2
+        start_x = 0.6
+        start_y = 1.5
+        gap = 0.3
+        
+        for i, text in enumerate(items):
+            col = i % cols
+            row = i // cols
+            
+            x = start_x + col * (card_width + gap)
+            y = start_y + row * (card_height + gap)
+            
+            # Card
+            card = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(x), Inches(y),
+                Inches(card_width), Inches(card_height)
+            )
+            card.fill.solid()
+            card.fill.fore_color.rgb = hex_to_rgb(self.surface)
+            card.line.fill.background()
+            
+            # Top accent on card
+            card_accent = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(x), Inches(y),
+                Inches(card_width), Inches(0.08)
+            )
+            card_accent.fill.solid()
+            # Alternate colors
+            accent_colors = [self.primary, self.accent, darken_color(self.primary, 0.1)]
+            card_accent.fill.fore_color.rgb = hex_to_rgb(accent_colors[i % 3])
+            card_accent.line.fill.background()
+            
+            # Card number
+            num_circle = slide.shapes.add_shape(
+                MSO_SHAPE.OVAL,
+                Inches(x + 0.2), Inches(y + 0.3),
+                Inches(0.45), Inches(0.45)
+            )
+            num_circle.fill.solid()
+            num_circle.fill.fore_color.rgb = hex_to_rgb(accent_colors[i % 3])
+            num_circle.line.fill.background()
+            
+            num_box = slide.shapes.add_textbox(Inches(x + 0.2), Inches(y + 0.35), Inches(0.45), Inches(0.4))
+            tf = num_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = str(i + 1)
+            p.font.size = Pt(16)
+            p.font.bold = True
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.alignment = PP_ALIGN.CENTER
+            
+            # Card text
+            text_box = slide.shapes.add_textbox(
+                Inches(x + 0.15), Inches(y + 0.9),
+                Inches(card_width - 0.3), Inches(card_height - 1.1)
+            )
+            tf = text_box.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.text = text[:90] if len(text) > 90 else text
+            p.font.size = Pt(12)
+            p.font.color.rgb = hex_to_rgb(self.text_color)
+            p.font.name = self.body_font
+    
+    # ==================== STATS SHOWCASE SLIDE ====================
+    
+    def _create_stats_showcase_slide(self, title: str, body_texts: List[str]):
+        """Create a visually striking statistics slide"""
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._set_slide_background(slide, self.primary)
+        
+        # Decorative circles
+        circle1 = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(11), Inches(5), Inches(4), Inches(4))
+        circle1.fill.solid()
+        circle1.fill.fore_color.rgb = hex_to_rgb(lighten_color(self.primary, 0.1))
+        circle1.line.fill.background()
+        
+        circle2 = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(-2), Inches(-2), Inches(4), Inches(4))
+        circle2.fill.solid()
+        circle2.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        circle2.line.fill.background()
         
         # Title in white
         if title:
-            title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(9), Inches(1.2))
-            self._format_title_text(title_box, title, '#ffffff', center=True, size=48)
+            title_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(11.5), Inches(1))
+            tf = title_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = title.split('.')[0].strip()[:50]
+            p.font.size = Pt(32)
+            p.font.bold = True
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.font.name = self.title_font
         
-        # Contact info
-        if body_texts:
-            info_box = slide.shapes.add_textbox(Inches(0.5), Inches(3.4), Inches(9), Inches(0.6))
-            self._format_body_text(info_box, body_texts[0], '#ffffff', center=True, size=18, opacity=0.9)
+        # Stats cards
+        stats = body_texts[:4]
+        card_width = 2.8
+        total_width = len(stats) * card_width + (len(stats) - 1) * 0.4
+        start_x = (13.333 - total_width) / 2
+        
+        for i, stat_text in enumerate(stats):
+            x = start_x + i * (card_width + 0.4)
+            
+            # White card
+            card = slide.shapes.add_shape(
+                MSO_SHAPE.ROUNDED_RECTANGLE,
+                Inches(x), Inches(2.2),
+                Inches(card_width), Inches(3.5)
+            )
+            card.fill.solid()
+            card.fill.fore_color.rgb = RGBColor(255, 255, 255)
+            card.line.fill.background()
+            
+            # Parse stat
+            parts = stat_text.split(':', 1) if ':' in stat_text else [stat_text[:20], stat_text[20:]]
+            value = parts[0].strip()
+            label = parts[1].strip() if len(parts) > 1 else ''
+            
+            # Big number/value
+            value_box = slide.shapes.add_textbox(
+                Inches(x + 0.1), Inches(2.6),
+                Inches(card_width - 0.2), Inches(1.2)
+            )
+            tf = value_box.text_frame
+            p = tf.paragraphs[0]
+            p.text = value[:15]
+            p.font.size = Pt(28)
+            p.font.bold = True
+            p.font.color.rgb = hex_to_rgb(self.primary)
+            p.alignment = PP_ALIGN.CENTER
+            p.font.name = self.title_font
+            
+            # Label
+            if label:
+                label_box = slide.shapes.add_textbox(
+                    Inches(x + 0.1), Inches(3.9),
+                    Inches(card_width - 0.2), Inches(1.5)
+                )
+                tf = label_box.text_frame
+                tf.word_wrap = True
+                p = tf.paragraphs[0]
+                p.text = label[:60]
+                p.font.size = Pt(11)
+                p.font.color.rgb = hex_to_rgb(self.text_muted)
+                p.alignment = PP_ALIGN.CENTER
+                p.font.name = self.body_font
     
-    def _create_section_slide(self, title: str):
-        """Create a section break slide"""
+    # ==================== STUNNING CLOSING SLIDE ====================
+    
+    def _create_stunning_closing_slide(self, title: str, body_texts: List[str]):
+        """Create a memorable closing slide"""
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self._set_slide_background(slide, self.primary)
         
-        bg = self.theme.get('background', '#ffffff')
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
+        # Large decorative shapes
+        shape1 = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL,
+            Inches(9), Inches(4),
+            Inches(6), Inches(6)
+        )
+        shape1.fill.solid()
+        shape1.fill.fore_color.rgb = hex_to_rgb(self.accent)
+        shape1.line.fill.background()
         
-        primary = self.theme.get('primary', '#0077b6')
-        accent = self.theme.get('accent', primary)
+        shape2 = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL,
+            Inches(-2), Inches(-3),
+            Inches(8), Inches(8)
+        )
+        shape2.fill.solid()
+        shape2.fill.fore_color.rgb = hex_to_rgb(lighten_color(self.primary, 0.15))
+        shape2.line.fill.background()
         
-        # Title centered
-        if title:
-            title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2.2), Inches(9), Inches(1))
-            self._format_title_text(title_box, title, primary, center=True, size=42)
+        # Main message
+        message = title if title else "Thank You"
+        if "terima" in message.lower() or "thank" in message.lower():
+            message = "Thank You"
+        
+        title_box = slide.shapes.add_textbox(Inches(0.8), Inches(2.5), Inches(11.5), Inches(1.5))
+        tf = title_box.text_frame
+        p = tf.paragraphs[0]
+        p.text = message
+        p.font.size = Pt(60)
+        p.font.bold = True
+        p.font.color.rgb = RGBColor(255, 255, 255)
+        p.alignment = PP_ALIGN.CENTER
+        p.font.name = self.title_font
+        
+        # Tagline
+        tagline = body_texts[0] if body_texts else "Questions?"
+        sub_box = slide.shapes.add_textbox(Inches(0.8), Inches(4.2), Inches(11.5), Inches(0.8))
+        tf = sub_box.text_frame
+        p = tf.paragraphs[0]
+        p.text = tagline[:80]
+        p.font.size = Pt(22)
+        p.font.color.rgb = RGBColor(255, 255, 255)
+        p.alignment = PP_ALIGN.CENTER
+        p.font.name = self.body_font
         
         # Decorative line
-        line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(4.4), Inches(3.5), Inches(1.2), Inches(0.06))
+        line = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(5.5), Inches(5.2),
+            Inches(2.333), Inches(0.06)
+        )
         line.fill.solid()
-        line.fill.fore_color.rgb = hex_to_rgb(accent)
+        line.fill.fore_color.rgb = hex_to_rgb(self.accent)
         line.line.fill.background()
     
-    def _create_stats_slide(self, title: str, body_texts: List[str]):
-        """Create a statistics showcase slide"""
-        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-        
-        bg = self.theme.get('background', '#ffffff')
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
-        
-        primary = self.theme.get('primary', '#0077b6')
-        text_color = self.theme.get('text', '#1a1a2e')
-        surface = self.theme.get('surface', '#f5f5f5')
-        
-        self._add_accent_element(slide, self.style.get('layout', {}).get('accent_position', 'left-bar'))
-        
-        # Title
-        if title:
-            title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.8), Inches(0.8))
-            self._format_title_text(title_box, title, primary, size=28)
-        
-        # Stats as cards
-        stats = body_texts[:4]
-        if stats:
-            card_width = 2.0
-            total_width = len(stats) * card_width + (len(stats) - 1) * 0.3
-            start_x = (10 - total_width) / 2
-            
-            for i, stat_text in enumerate(stats):
-                x = start_x + i * (card_width + 0.3)
-                
-                # Card background
-                card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(2), Inches(card_width), Inches(2.2))
-                card.fill.solid()
-                card.fill.fore_color.rgb = hex_to_rgb(surface)
-                card.line.fill.background()
-                
-                # Stat text
-                stat_box = slide.shapes.add_textbox(Inches(x + 0.1), Inches(2.3), Inches(card_width - 0.2), Inches(1.6))
-                tf = stat_box.text_frame
-                tf.word_wrap = True
-                
-                # Try to parse as value:label
-                parts = stat_text.split(':', 1) if ':' in stat_text else stat_text.split('-', 1) if '-' in stat_text else [stat_text, '']
-                value = parts[0].strip()
-                label = parts[1].strip() if len(parts) > 1 else ''
-                
-                p = tf.paragraphs[0]
-                p.text = value
-                p.font.size = Pt(32)
-                p.font.bold = True
-                p.font.color.rgb = hex_to_rgb(primary)
-                p.alignment = PP_ALIGN.CENTER
-                
-                if label:
-                    p2 = tf.add_paragraph()
-                    p2.text = label
-                    p2.font.size = Pt(11)
-                    p2.font.color.rgb = hex_to_rgb(self.theme.get('text_muted', '#666666'))
-                    p2.alignment = PP_ALIGN.CENTER
-    
-    def _create_media_slide(self, title: str, body_texts: List[str], media_type: str):
-        """Create a slide with media placeholder (chart or image)"""
-        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-        
-        bg = self.theme.get('background', '#ffffff')
-        if not bg.startswith('linear'):
-            self._set_slide_background(slide, bg)
-        
-        primary = self.theme.get('primary', '#0077b6')
-        text_color = self.theme.get('text', '#1a1a2e')
-        surface = self.theme.get('surface', '#f5f5f5')
-        
-        self._add_accent_element(slide, self.style.get('layout', {}).get('accent_position', 'left-bar'))
-        
-        # Title
-        if title:
-            title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.8), Inches(0.8))
-            self._format_title_text(title_box, title, primary, size=28)
-        
-        # Content on left
-        if body_texts:
-            content_box = slide.shapes.add_textbox(Inches(0.6), Inches(1.4), Inches(3.5), Inches(3.8))
-            self._add_bullet_list(content_box, body_texts[:5], text_color, size=14)
-        
-        # Media placeholder on right
-        placeholder = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(4.5), Inches(1.4), Inches(5), Inches(3.6))
-        placeholder.fill.solid()
-        placeholder.fill.fore_color.rgb = hex_to_rgb(surface)
-        placeholder.line.fill.background()
-        
-        # Placeholder icon text
-        icon_box = slide.shapes.add_textbox(Inches(4.5), Inches(2.8), Inches(5), Inches(0.6))
-        tf = icon_box.text_frame
-        p = tf.paragraphs[0]
-        p.text = f"[{media_type.upper()} PLACEHOLDER]"
-        p.font.size = Pt(12)
-        p.font.color.rgb = hex_to_rgb(self.theme.get('text_muted', '#888888'))
-        p.alignment = PP_ALIGN.CENTER
+    # ==================== UTILITIES ====================
     
     def _set_slide_background(self, slide, color: str):
         """Set slide background color"""
@@ -372,72 +678,8 @@ class PPTXExporter:
             fill.solid()
             fill.fore_color.rgb = hex_to_rgb(color)
     
-    def _add_accent_element(self, slide, accent_type: str):
-        """Add decorative accent element to slide"""
-        accent_color = self.theme.get('accent', self.theme.get('primary', '#0077b6'))
-        
-        if accent_type == 'left-bar':
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(0.08), Inches(5.625))
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = hex_to_rgb(accent_color)
-            shape.line.fill.background()
-        
-        elif accent_type == 'top-bar':
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(10), Inches(0.06))
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = hex_to_rgb(accent_color)
-            shape.line.fill.background()
-        
-        elif accent_type == 'bottom-bar' or accent_type == 'bottom-line':
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(5.3), Inches(9), Inches(0.04))
-            shape.fill.solid()
-            shape.fill.fore_color.rgb = hex_to_rgb(accent_color)
-            shape.line.fill.background()
-    
-    def _format_title_text(self, textbox, text: str, color: str, center: bool = False, size: int = 32):
-        """Format title text"""
-        tf = textbox.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = text
-        p.font.size = Pt(size)
-        p.font.bold = True
-        p.font.color.rgb = hex_to_rgb(color)
-        if center:
-            p.alignment = PP_ALIGN.CENTER
-    
-    def _format_body_text(self, textbox, text: str, color: str, center: bool = False, size: int = 16, opacity: float = 1.0):
-        """Format body text"""
-        tf = textbox.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = text
-        p.font.size = Pt(size)
-        p.font.color.rgb = hex_to_rgb(color)
-        if center:
-            p.alignment = PP_ALIGN.CENTER
-    
-    def _add_bullet_list(self, textbox, items: List[str], color: str, size: int = 16):
-        """Add bullet list to textbox"""
-        tf = textbox.text_frame
-        tf.word_wrap = True
-        
-        for i, text in enumerate(items[:8]):
-            if i == 0:
-                p = tf.paragraphs[0]
-            else:
-                p = tf.add_paragraph()
-            
-            p.text = f"• {text}"
-            p.font.size = Pt(size)
-            p.font.color.rgb = hex_to_rgb(color)
-            p.space_after = Pt(8)
-            p.line_spacing = 1.3
-    
     def _is_dark_color(self, color: str) -> bool:
         """Check if a color is dark"""
-        if color.startswith('linear'):
-            return 'dark' in color.lower() or '#0' in color or '#1' in color or '#2' in color
         if color.startswith('#'):
             hex_color = color.lstrip('#')
             if len(hex_color) == 6:
@@ -449,7 +691,11 @@ class PPTXExporter:
         return False
 
 
+# Keep old class name for backwards compatibility
+PPTXExporter = WorldClassExporter
+
+
 def export_presentation(style: Dict, slides_data: List[Dict], output_path: str) -> str:
     """Convenience function to export a presentation"""
-    exporter = PPTXExporter(style, slides_data)
+    exporter = WorldClassExporter(style, slides_data)
     return exporter.export(output_path)
