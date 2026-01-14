@@ -565,8 +565,8 @@ convert().catch(console.error);
 """
 
 
-def generate_professional_pptx(session: dict, use_ai: bool = True) -> str:
-    """Generate a professional PPTX - optionally using AI for design"""
+def generate_professional_pptx(session: dict, use_ai: bool = True, generate_images: bool = True) -> str:
+    """Generate a professional PPTX - optionally using AI for design and images"""
     try:
         slides_data = session.get('redesigned_slides', [])
         
@@ -578,13 +578,18 @@ def generate_professional_pptx(session: dict, use_ai: bool = True) -> str:
         output_path = os.path.join(output_dir, 'redesigned_presentation.pptx')
         
         if use_ai:
-            # Use AI-powered generator for custom designs
+            # Use AI-powered generator for custom designs with optional image generation
             from services.ai_pptx_generator import generate_ai_presentation
             api_key = os.environ.get('REPLICATE_API_TOKEN')
             
             try:
-                asyncio.run(generate_ai_presentation(slides_data, output_path, api_key))
-                print(f"[AI Generator] Successfully created AI-designed presentation")
+                asyncio.run(generate_ai_presentation(
+                    slides_data, 
+                    output_path, 
+                    api_key,
+                    generate_images=generate_images
+                ))
+                print(f"[AI Generator] Successfully created AI-designed presentation (images={generate_images})")
                 return output_path
             except Exception as ai_error:
                 print(f"[AI Generator] Failed: {ai_error}, falling back to template")
